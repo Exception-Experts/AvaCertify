@@ -74,7 +74,7 @@ AvaCertify is a decentralized application (dApp) that leverages smart contracts 
  npm start
 ```
 
-### 📍 Contract Details (Deployed on Fuji Testnet)
+### 📍 Contract Details (Deployed on EDU Chain Testnet)
 
 - **Transaction Hash:** `0x64340e5faa2ab5d06d00b1dac2212d167abedf939d670631a0d7ad3ae023d6c6`
 - **Block Number:** `33573944`
