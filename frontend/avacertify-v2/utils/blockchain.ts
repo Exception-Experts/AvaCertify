@@ -1,17 +1,20 @@
 // utils/blockchain.ts
 import { ethers } from 'ethers';
-import { CONTRACT_ADDRESS, CONTRACT_ABI, AVALANCHE_FUJI_CONFIG } from '../utils/contractConfig';
+import { CONTRACT_ADDRESS, CONTRACT_ABI, Educhain_Test_CONFIG } from '../utils/contractConfig';
 
 export interface Certificate {
-    id: number;
-    recipientName: string;
-    issueDate: number;
-    isValid: boolean;
-    institutionName: string;
-    certificateType: string;
-    additionalDetails?: string;
-    isRevoked: boolean;
+  id: string
+  recipientName: string
+  recipientAddress: string
+  certificateType: string
+  issueDate: string
+  expirationDate?: string
+  institutionName: string
+  status: 'active' | 'revoked'
+  additionalDetails?: string
 }
+
+export const placeholderCertificates: Certificate[] = []
 
 interface NFTMetadata {
     name: string;
@@ -23,9 +26,20 @@ interface NFTMetadata {
     }>;
 }
 
+type ContractMethodName = 'issueCertificate' | 'getCertificate' | 'revokeCertificate';
+
+interface ContractMethods {
+    issueCertificate(recipientName: string): Promise<any>;
+    getCertificate(id: string): Promise<any>;
+    revokeCertificate(id: string): Promise<any>;
+    estimateGas: {
+        [key in ContractMethodName]: (...args: any[]) => Promise<number>;
+    };
+}
+
 export class CertificateService {
     private provider: ethers.BrowserProvider | null = null;
-    private contract: ethers.Contract | null = null;
+    private contract: (ethers.Contract & ContractMethods) | null = null;
     private signer: ethers.Signer | null = null;
 
     constructor() {
@@ -36,13 +50,12 @@ export class CertificateService {
 
     async init(): Promise<void> {
         if (!this.provider) {
-            throw new Error('Provider not initialized');
+          throw new Error('No provider available');
         }
         try {
-            this.signer = await this.provider.getSigner();
-            this.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, this.signer);
+            await this.provider.send('eth_requestAccounts', []);
         } catch (error) {
-            console.error('Error initializing contract:', error);
+            console.error('Failed to initialize provider:', error);
             throw error;
         }
     }
@@ -63,7 +76,7 @@ export class CertificateService {
                 }
                 await (window.ethereum as any).request({
                     method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: AVALANCHE_FUJI_CONFIG.chainId }],
+                    params: [{ chainId: Educhain_Test_CONFIG.chainId }],
                 });
             } catch (switchError: any) {
                 // This could be due to the network not existing or the user rejecting the switch
@@ -74,7 +87,7 @@ export class CertificateService {
                         }
                         await (window.ethereum as any).request({
                             method: 'wallet_addEthereumChain',
-                            params: [AVALANCHE_FUJI_CONFIG],
+                            params: [Educhain_Test_CONFIG],
                         });
                     } catch (addError) {
                         console.error('Error adding Avalanche Fuji network:', addError);
@@ -90,7 +103,7 @@ export class CertificateService {
             }
 
             this.signer = await this.provider.getSigner();
-            this.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, this.signer);
+            this.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, this.signer) as ethers.Contract & ContractMethods;
 
             return accounts[0];
         } catch (error: any) {
@@ -112,7 +125,7 @@ export class CertificateService {
 
             }
 
-            this.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, this.signer);
+            this.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, this.signer) as ethers.Contract & ContractMethods;
 
         }
 
@@ -120,25 +133,14 @@ export class CertificateService {
 
     }
 
-    private async validateTransaction(method: string, params: any[]): Promise<boolean> {
+    private async validateTransaction(method: ContractMethodName, params: any[]): Promise<boolean> {
         if (!this.contract || !this.signer) {
-            return false;
+            throw new Error('Contract or signer not initialized');
         }
-        
+
         try {
-            // Estimate gas to verify transaction is valid
-            const gasEstimate = await (this.contract?.estimateGas as any)[method](...params);
-            
-            // Get current gas price
-            const gasPrice = await this.provider?.getFeeData();
-            
-            // Calculate maximum cost
-            const maxCost = gasEstimate * (gasPrice?.maxFeePerGas || BigInt(0));
-            
-            // Get contract bytecode to verify it matches deployed contract
-            const bytecode = await this.provider?.getCode(this.contract.getAddress());
-            
-            return bytecode !== '0x' && maxCost > 0;
+            const gasEstimate = await this.contract.estimateGas[method](...params);
+            return Number(gasEstimate) > 0;
         } catch (error) {
             console.error('Transaction validation failed:', error);
             return false;
@@ -154,7 +156,7 @@ export class CertificateService {
                 { trait_type: "Institution", value: certificate.institutionName },
                 { trait_type: "Type", value: certificate.certificateType },
                 { trait_type: "Issue Date", value: certificate.issueDate.toString() },
-                { trait_type: "Status", value: certificate.isRevoked ? "Revoked" : "Valid" }
+                { trait_type: "Status", value: certificate.status === 'revoked' ? "Revoked" : "Valid" }
             ]
         };
     }
@@ -180,11 +182,11 @@ export class CertificateService {
             const metadata = await this.generateMetadata({
                 id: certificateId,
                 recipientName,
+                recipientAddress,
                 certificateType: "Certificate",
-                issueDate: Math.floor(Date.now() / 1000),
-                isRevoked: false,
-                institutionName: "Your Institution",
-                isValid: true
+                issueDate: Math.floor(Date.now() / 1000).toString(),
+                status: 'active',
+                institutionName: "Your Institution"
             });
 
             // Upload metadata to IPFS (implement this)
